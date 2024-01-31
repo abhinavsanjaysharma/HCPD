@@ -17,16 +17,18 @@ def initialise_SMU(resource_name):
 #pick one of the ways of setting voltage points below
 
 Vs = np.arange(-0.5,0.5,0.01) # (start, end, step)
-Vs = np.linspace(-0.6,0.6,10) # (start, end, number_of_points)
-
+Vs_1 = np.arange(-5,5,0.1) # (start, end, number_of_points)
+Vs_2 = np.arange(5,-5,-0.1)
+Vs = np.append(Vs_1,Vs_2)
+# Vs = np.repeat(-2,100)
 #pick one of the ways of setting voltage points above
 
-def IV_measure(Vs,device,file_name='IV_curve',comments='',save=False,plot=False,ax=None):
+def IV_measure(Vs,device,file_name='IV_curve',comments='',save=False,plot=False,ax=None,ilimit=0.1):
         
     Is = [None for volt in Vs]
     device.write("reset()")
     device.write("smu.source.func = smu.FUNC_DC_VOLTAGE") # set source to voltage
-    device.write("smu.source.ilimit.level = 0.1") # set current limit (in Amps)
+    device.write(f"smu.source.ilimit.level = {ilimit}") # set current limit (in Amps)
     device.write("smu.source.autorange = smu.ON") # set voltage range to auto
     device.write("smu.source.autodelay = smu.ON") # set delay                                                                                                                                                                                                                to auto
     device.write("smu.measure.func = smu.FUNC_DC_CURRENT") # set measurement to current
@@ -77,7 +79,7 @@ def IV_measure(Vs,device,file_name='IV_curve',comments='',save=False,plot=False,
 
     return df
 
-def IV_loop(Vs,device, runs, depvars=None,file_name='IV_curve',save=False,plot=False):
+def IV_loop(Vs,device, runs, depvars=None,file_name='IV_curve',save=False,plot=False,click=False,folder=None,ilimit=0.1):
     if plot:
         fig, ax = plt.subplots()
         # print('newax_loop')
@@ -86,13 +88,15 @@ def IV_loop(Vs,device, runs, depvars=None,file_name='IV_curve',save=False,plot=F
     for run in np.arange(runs):
         if not depvars:
             comments = run+1
-        if run == 0:
-            input("Press Enter to start first measurement")
-        else:
-            input("Press Enter to start next measurement")
+        
+        if click:
+            if run == 0:
+                input("Press Enter to start first measurement")
+            else:
+                input("Press Enter to start next measurement")
         
 
-        df = IV_measure(Vs,device,comments=comments,save=False,plot=plot,ax=ax)
+        df = IV_measure(Vs,device,comments=comments,save=False,plot=plot,ax=ax,ilimit=ilimit)
         
         
         print(f'Measurement {run+1} complete')
@@ -100,8 +104,9 @@ def IV_loop(Vs,device, runs, depvars=None,file_name='IV_curve',save=False,plot=F
             comments2 = input('If required, enter additional comments to the filename\n')
             
             save_datetime = datetime.datetime.now().strftime('_%Y-%m-%d %H-%M-%S') #get current date and time
-            
-            folder  = 'C:/Users/z5239428/OneDrive - UNSW/Data/I-V/HC_photodetection_IV/'
+            if folder is None:
+            # folder  = 'C:/Users/z5239428/OneDrive - UNSW/Data/I-V/HC_photodetection_IV/'
+                folder = 'C:/Data/'
             total_filename = folder+file_name+'_'+str(comments)+'_'+comments2+save_datetime+'.csv'
             df.to_csv(total_filename)
         
@@ -110,8 +115,12 @@ def IV_loop(Vs,device, runs, depvars=None,file_name='IV_curve',save=False,plot=F
         
 if __name__ == "__main__":     
     rname = "USB0::0x05E6::0x2470::04473418::INSTR"
-    device= initialise_SMU(rname)        
-    IV_loop(Vs,device,2,file_name='IV_JD_ICL10b',plot=True,save=False)
+    device= initialise_SMU(rname)     
+    Vs = np.arange(-0.5,0.5,0.01) # (start, end, step)
+    Vs_1 = np.arange(0,3,0.05) # (start, end, number_of_points)
+    Vs_2 = np.arange(3,0,-0.05)
+    Vs = np.append(Vs_1,Vs_2)
+    IV_loop(Vs,device,runs=1,file_name='1550nm_200mAV3O5_5um_L1_D2_TS_50 Ohm',plot=True,save=True,click=False,folder='C:/Data/V3O5 deviices/5um width_5um gap_L1_D1/',ilimit=0.005)
         
     
     
