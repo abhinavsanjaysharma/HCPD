@@ -22,33 +22,80 @@ import os
 
 
 def initialise_SMU(resource_name="USB0::0x05E6::0x2470::04473418::INSTR"):
+    '''
+    Function to connect to SMU and initialise it.
+
+    Parameters
+    ----------
+    resource_name : str
+        address of instrument. The default is "USB0::0x05E6::0x2470::04473418::INSTR", which is the USB address of Keithley 2470 SMU.
+
+    Returns
+    -------
+    device : Instrument object
+        Instrument object which is used to refer to SMU and used to send commands to it.
+    device_name : str
+        Equipment model/name detected.
+
+    '''
     rm=visa.ResourceManager()
     device=rm.open_resource(resource_name)
-    device.write("*RST")
-    device_name = device.query("*IDN?")
-    device.timeout = 100000
+    device.write("*RST") # reset device
+    device_name = device.query("*IDN?") # ask device its identity
+    device.timeout = 100000 #set a high timeout value (in seconds) to avoid timeout errors (which generally require SMU restart)
     return device, device_name
 
-def create_function_button(frame, text, command):
+def create_function_button(frame, text, command): # remove, superfluous. it is atm used in pulse train. 
     button = ttk.Button(frame, text=text, command=command)
     return button
 
-def display_device_name(frame, device_name):
-    label = ttk.Label(frame, text=f"Device Name: {device_name}")
-    label.grid(column=0, row=1)
+def IV_measure(source_values,device,folder='C:/Data/',file_name='IV_curve',comments='',save=False,plot=True,ax=None,fig=None,gui=False,fourwire=False,sourcevolt=True,source_limit=0.1):
+    '''
+    Function to measure IV curves using the SMU. Connect and initialise to SMU BEFORE running it.
 
-#pick one of the ways of setting voltage points below
+    Parameters
+    ----------
+    source_values : list or array
+        list of source (voltage or current) values.
+    device : Instrument object
+        Instrument object which is used to refer to SMU and used to send commands to it.
+    folder : str, optional
+        folder name if saving data. The default is 'C:/Data/'.
+    file_name : str, optional
+        file name if saving data. The default is 'IV_curve'.
+    comments : str, optional
+        additional comments in file name if saving data. No comments are added by default.
+    save : bool, optional
+        Choose whether to save measured data or not. The default is False.
+    plot : bool, optional
+        As the function stands the measuring and plot are tied together, so this needs to be set True to measure. Oops... The default is True.
+    ax : matplotlib axes object, optional
+        pass this if plot needs to be on an existing axis. The default is None, which creates a new one.
+    fig : matplotlib figure object, optional
+        pass this if plot needs to be on an existing figure. The default is None, which creates a new one.
+    gui : bool, optional
+        boolean to control and add GUI specific parts if needed. The default is False.
+    fourwire : bool, optional
+        Use 4-Wire sensing if True, 2-Wire sensing if False. The default is False.
+    sourcevolt : bool, optional
+        Use voltage as source if True, current sourcing if False. The default is True.
+    source_limit : float, optional
+        limit of the measured variable (current (A) or voltage (V)). The default is 0.1.
 
-Vs = np.arange(-0.5,0.5,0.01) # (start, end, step)
-Vs = np.linspace(-0.6,0.6,10) # (start, end, number_of_points)
+    Returns
+    -------
+    df : pandas DataFrame
+        dataframe containing tabular I-V data.
+    animation : matplotlib animation object
+        animation object for live plotting. it may sometimes be important to keep this variable alive to keep the animation going.
 
-#pick one of the ways of setting voltage points above
-
-def IV_measure(source_values,device,file_name='IV_curve',comments='',save=False,plot=True,ax=None,fig=None,gui=False,fourwire=False,sourcevolt=True,source_limit=0.1):
-        
-    measure_values = [None for value in source_values]
-    device.write("reset()")
-    # print('setting according to voltage or current source')
+    '''
+    
+    measure_values = [None for value in source_values] # create dummy list (to be filled) of measured values with Nones
+    times = [None for value in source_values]
+    
+    device.write("reset()") # reset device
+    
     if sourcevolt:
         print('Voltage source mode')
         # Configuration for measuring current
@@ -56,7 +103,7 @@ def IV_measure(source_values,device,file_name='IV_curve',comments='',save=False,
         measure_func = "smu.FUNC_DC_CURRENT"
         measure_label = 'Current (A)'
         source_label = 'Voltage (V)'
-        device.write(f"smu.source.func = {source_func}")
+        device.write(f"smu.source.func = {source_func}") # set source function
         device.write(f"smu.measure.func = {measure_func}")  # set measurement function
         device.write(f"smu.source.ilimit.level = {source_limit}")  # set current limit (in Amps)
         # device.write("smu.source.ilimit.level = 0.1")  # set current limit (in Amps)
@@ -68,32 +115,30 @@ def IV_measure(source_values,device,file_name='IV_curve',comments='',save=False,
         measure_func = "smu.FUNC_DC_VOLTAGE"
         measure_label = 'Voltage (V)'
         source_label = 'Current (A)'
-        device.write(f"smu.source.func = {source_func}")
+        device.write(f"smu.source.func = {source_func}") # set source function
         device.write(f"smu.measure.func = {measure_func}")  # set measurement function
-        device.write(f"smu.source.vlimit.level = {source_limit}")  
+        device.write(f"smu.source.vlimit.level = {source_limit}")  # set voltage limit (in Volts)
         
-    # print('rest of the commands')
-      # set source function
-    
-    device.write("smu.source.autorange = smu.ON")  # set voltage/current range to auto
+    device.write("smu.source.autorange = smu.ON")  # set source range to auto
     device.write("smu.source.autodelay = smu.ON")  # set delay to auto
     
-    device.write("smu.measure.autorange = smu.ON")  # set current/voltage range to auto
-    device.write("smu.measure.nplc = 0.01")   
-    if fourwire: # set to 2WIRE or 4WIRE
+    device.write("smu.measure.autorange = smu.ON")  # set measure range to auto
+    device.write("smu.measure.nplc = 0.01")   # Number of Power Line Cycles (NPLC) determines integration time
+    
+    if fourwire: # set to 2-WIRE or 4-WIRE sensing
         device.write("smu.measure.sense=smu.SENSE_4WIRE") 
     else:
         
         device.write("smu.measure.sense=smu.SENSE_2WIRE") 
-    # print('moving to plot')
+
     if plot:
-        if not ax:
+        if not ax: # make new figure if axis is not passed
             fig, ax = plt.subplots(figsize=(1.5, 1))
             # print('newax')
         line, = ax.plot([], [],'o-', label=comments)
         ax.set_xlabel(source_label)
         ax.set_ylabel(measure_label)
-        if gui and False:
+        if gui and False: # code for embedding plot into GUI. Didn't get it to work well so at the moment not in use.
             canvas = FigureCanvasTkAgg(fig, master=root)
             canvas_widget = canvas.get_tk_widget()
             canvas_widget.grid(column=1, row=6)  # Adjust the row and column as needed
@@ -104,34 +149,32 @@ def IV_measure(source_values,device,file_name='IV_curve',comments='',save=False,
                 root.destroy()
         
             root.protocol("WM_DELETE_WINDOW", on_close)  # Handle window close event
-        def update_plot(frame):
+        def update_plot(frame): # update_plot is called by funcanimation (see after function) to measure and plot data in real time
             source_value = source_values[frame]
         
-            device.write("smu.source.level = "+str(source_value)) # Set voltage 
+            device.write("smu.source.level = "+str(source_value)) # Set source value 
             device.write("smu.source.output = smu.ON") # SMU output on
             device.write("smu.measure.read()") # measure current
-            # device.write("smu.source.output = smu.OFF") # SMU output off
+            
             measure_values[frame] = device.query("print(defbuffer1.readings[defbuffer1.endindex])") # store current reading
-        
+            
             measure_values[frame] = float(measure_values[frame]) # .query returns a string, so it must be casted to float number
-            # print('measure values frame')
-            # print(measure_values[frame])
-            if frame%1 == 0:
-                # ax.clear()
-                # ax.plot(Vs[:frame+1],Is[:frame+1],label=comments)
+            times[frame] = (float(device.query("print(defbuffer1.relativetimestamps[defbuffer1.endindex])"))) # measure and append time stamp
+            if frame%1 == 0: # change to frame%n to update plot every nth frame
                 line.set_xdata(source_values[:frame+1])
                 line.set_ydata(measure_values[:frame+1])
                 ax.relim()
                 ax.autoscale_view(True, True, True)
-                # ax.set_xlim(np.nanmin(np.array(Vs,dtype=float)), np.nanmax(np.array(Vs,dtype=float)))
-                # ax.set_ylim(np.nanmin(np.array(Is,dtype=float)), np.nanmax(np.array(Is,dtype=float)))
                 ax.legend()
-                # plt.pause(0.05)
-            if gui and False:
+            if gui and False: # code for embedding plot into GUI. Didn't get it to work well so at the moment not in use.
                 canvas.draw()
                 root.update()
+        
         animation = FuncAnimation(fig, update_plot, frames=len(source_values), repeat=False, interval=5)
-        # plt.show()
+
+        # below commented code is a way of continuously asking the device whether it's done running the measurement
+        # generally seems to work ok without it, but can try uncommenting if issues come up.
+        
         # time.sleep(1)
         # device.write("*OPC?")
         # try:
@@ -140,44 +183,56 @@ def IV_measure(source_values,device,file_name='IV_curve',comments='',save=False,
         # except:
         #     print('except')
         #     status=0
-    while None in measure_values:
-        # print('sleeping')
-        plt.pause(0.01)
-            # device.write("*OPC?")
-            # status = float(device.read())
         
-        
-        
+    while None in measure_values: # while measurement is still ongoing
 
-    # print('Measured values')    
-    # print(measure_values)
-    df = pd.DataFrame({source_label: source_values, measure_label: measure_values}) # turn data into a pandas dataframe with voltage and current columns
+        plt.pause(0.01) # pause enables updating the plot animation
+        
+    device.write("smu.source.output = smu.OFF") # SMU output off        
+    
+    # turn data into a pandas DataFrame with time, voltage, current columns
+    df = pd.DataFrame({'Time (s)':times,source_label: source_values, measure_label: measure_values}) 
+    
+    # print data table
     print('Final measured data')
     print(df)
     
+    # save data
     if save:
-        # file_name = 'IV_curve' #set filename as desired              
-        save_datetime = datetime.datetime.now().strftime('_%Y-%m-%d %H-%M-%S') #get current date and time
+       
+        save_datetime = datetime.datetime.now().strftime('_%Y-%m-%d %H-%M-%S') # get current date and time
         
-        folder  = 'C:/Users/z5239428/OneDrive - UNSW/Data/I-V/HC_photodetection_IV/'
-        total_filename = folder+file_name+'_'+str(comments)+save_datetime+'.csv'
-        df.to_csv(total_filename)
-    
-    # if plot:
-    #     fig, ax = plt.subplots()
-    #     ax.plot(Vs,Is)
-    #     ax.set_ylabel('Current (A)')
-    #     ax.set_xlabel('Voltage (V)')
-    #     # plt.draw()
-    #     plt.show()
-    
-    
-        
-        
+        total_filename = folder+file_name+'_'+str(comments)+save_datetime+'.csv' # append together the total file name
+        df.to_csv(total_filename) # save DataFrame as csv
 
     return df,animation
 
 def IV_loop(Vs,device, runs, depvars=None,file_name='IV_curve',save=False,plot=False):
+    '''
+    
+
+    Parameters
+    ----------
+    Vs : TYPE
+        DESCRIPTION.
+    device : TYPE
+        DESCRIPTION.
+    runs : TYPE
+        DESCRIPTION.
+    depvars : TYPE, optional
+        DESCRIPTION. The default is None.
+    file_name : TYPE, optional
+        DESCRIPTION. The default is 'IV_curve'.
+    save : TYPE, optional
+        DESCRIPTION. The default is False.
+    plot : TYPE, optional
+        DESCRIPTION. The default is False.
+
+    Returns
+    -------
+    None.
+
+    '''
     if plot:
         fig, ax = plt.subplots()
         # print('newax_loop')
@@ -205,7 +260,32 @@ def IV_loop(Vs,device, runs, depvars=None,file_name='IV_curve',save=False,plot=F
             total_filename = folder+file_name+'_'+str(comments)+'_'+comments2+save_datetime+'.csv'
             df.to_csv(total_filename)
 
-def IT_loop(device, set_V,duration,nplc=1,gui=False,ilimit=0.1):
+def IT_loop(device, set_V,duration,nplc=1,gui=False,ilimit=0.1,save=True):
+    '''
+    Parameters
+    ----------
+    device : Instrument object
+        Instrument object referring to SMU.
+    set_V : float
+        Applied bias voltage (in Volts) at which current is measured.
+    duration : float
+        Duration in seconds for which bias is applied.
+    nplc : float, optional
+        number of power line cycles (integration time) per second. The default is 1.
+    gui : bool, optional
+        argument passed if function is called from the GUI. The default is False.
+    ilimit : float, optional
+        Current limit in Amperes. The default is 0.1.
+    save : bool, optional
+        Whether to save data or not. The default is True
+
+    Returns
+    -------
+    df : pandas DataFrame
+        Measurement table dataframe.
+
+
+    '''
     device.write("reset()")
     device.write("smu.source.func = smu.FUNC_DC_VOLTAGE") # set source to voltage
     device.write(f"smu.source.ilimit.level = {ilimit}") # set current limit (in Amps)
@@ -217,10 +297,10 @@ def IT_loop(device, set_V,duration,nplc=1,gui=False,ilimit=0.1):
     device.write("smu.measure.sense=smu.SENSE_2WIRE") # set to 2WIRE or 4WIRE
     device.write("smu.source.level = "+str(set_V)) # Set voltage 
     device.write("smu.source.output = smu.ON") # SMU output on
-    device.write("smu.source.delay = 0")
-    device.write("smu.measure.nplc = "+str(nplc))
+    device.write("smu.source.delay = 0") # set delay to zero
+    device.write("smu.measure.nplc = "+str(nplc)) # set number of power line cycles
     # start = datetime.datetime.now()
-    Is, times = [], []
+    Vs, Is, times = [], [], []
     time = 0
     fig,ax = plt.subplots()
 
@@ -230,19 +310,21 @@ def IT_loop(device, set_V,duration,nplc=1,gui=False,ilimit=0.1):
         # print(f'time:{time}')
         # times.append(time)
         try:
-            Vs.append(float(device.query("print(defbuffer1.sourcevalues[defbuffer1.endindex]")))
+            Vs.append(float(device.query("print(defbuffer1.sourcevalues[defbuffer1.endindex]"))) # store applied source voltage
             Is.append(float(device.query("print(defbuffer1.readings[defbuffer1.endindex])"))) # store current reading
-            times.append(float(device.query("print(defbuffer1.relativetimestamps[defbuffer1.endindex])")))
+            times.append(float(device.query("print(defbuffer1.relativetimestamps[defbuffer1.endindex])"))) # store timestamp
         except:
             continue
         time = times[-1]
-        # print(f'Is:{Is}')
+
         ax.clear()
         ax.set_ylabel('Current (A)')
         ax.set_xlabel('Time (s)')
         ax.plot(times,Is)
         # plt.legend()
         plt.pause(0.05)
+        # below is an attempt to embed plot in GUI if the function is called via the GUI
+        # commented out because I couldn't quite get it to work
         # if gui:
         #     # fig, ax = plt.subplots()
         #     # ax.plot(V, I, label='I-t plot')
@@ -257,50 +339,64 @@ def IT_loop(device, set_V,duration,nplc=1,gui=False,ilimit=0.1):
             
     
     device.write("smu.source.output = smu.OFF") # SMU output off
-    df = pd.DataFrame({'Time(s)': times, 'Voltage (V)': Vs, 'Current (A)': Is})
-    save = save_var.get()
+    df = pd.DataFrame({'Time(s)': times, 'Voltage (V)': Vs, 'Current (A)': Is}) # store data in a pandas DataFrame
+    if gui:
+        save = save_var.get() # get checkmark save_var from GUI if function is called from GUI
 
     if save:
-        # print('in the save')
-        save_data(df,comments='It')
-    return times, Is       
-def pulse_train(device,biaslevel=0,pulselevel=0.5,biaswidth=0.5,pulsewidth=0.5,points=10,limit=2.1,points_per_pulse = 5):
-    """
-    --[[Set Up Pulse parameters
-                *biaslevel: the offset current for the pulse train
-                *pulselevel: the amplitude current of each pulse (from zero, not bias level)
-                *biaswidth: the time at the bias level
-                *pulsewidth: the time at amplitude level for each pulse
-                *points: total number of pulses
-                *limit: the source limit level
-    ]]
-    """
+
+        save_data(df,comments='It') # save df as csv
+        
+    return df     
+def pulse_train(device,biaslevel=0,pulselevel=0.5,biaswidth=0.5,pulsewidth=0.5,points=10,limit=0.1,points_per_pulse = 5):
+    '''
+    Parameters
+    ----------
+    device : Instrument object
+        Instrument object to refer to SMU.
+    biaslevel : float, optional
+        Base voltage in Volts at 'off' position of pulse. The default is 0.
+    pulselevel : float, optional
+        Voltage in Volts at 'on' position of pulse. The default is 0.5.
+    biaswidth : float, optional
+        Time in seconds spent per cycle at 'off' position. The default is 0.5.
+    pulsewidth : float, optional
+        Time in seconds spent per cycle at 'on' position. The default is 0.5.
+    points : float, optional
+        Number of pulses. The default is 10.
+    limit : float, optional
+        Current limit in Amperes. The default is 0.1.
+    points_per_pulse : float, optional
+        Number of data points per pulse. Setting this very high or very low may confuse/crash the SMU. The default is 5.
+
+    Returns
+    -------
+    df : pandas DataFrame
+        Table of measurement values.
+
+    '''
+    
     device.write("reset()")
     device.write("smu.source.output = smu.OFF") # SMU output off  
     
-    # #--User specified test parameters:
-    # biaslevel = 0
-    # pulselevel = 0.5
-    # biaswidth = 0.5
-    # pulsewidth = 0.5
     
-    # points = 5
-    # limit = 2.1
     period = pulsewidth + biaswidth 
     
     #--Set to current source and set up source config list
     device.write("smu.source.configlist.create('OutputList')")
-    device.write("smu.source.func = smu.FUNC_DC_VOLTAGE")
-    device.write("smu.source.readback = smu.OFF")
+    device.write("smu.source.func = smu.FUNC_DC_VOLTAGE") # set source to be voltage
+    device.write("smu.source.readback = smu.OFF") 
     
     #--Set up measure commands
-    device.write("smu.measure.func = smu.FUNC_DC_CURRENT")
-    device.write("smu.measure.nplc = 0.01")       
+    device.write("smu.measure.func = smu.FUNC_DC_CURRENT") # set current to be measured
+    device.write("smu.measure.nplc = 0.01") # set number of power line cycles (integration time)
     device.write("smu.measure.autozero.once()")
     
     device.write("smu.measure.terminals = smu.TERMINALS_FRONT")
-    device.write("smu.measure.range ="+str(limit))
-    device.write("smu.measure.sense = smu.SENSE_4WIRE")
+
+    device.write(f"smu.source.ilimit.level = {limit}")  # set current limit (in Amps)
+
+    device.write("smu.measure.sense = smu.SENSE_2WIRE") # set to 2-Wire sensing
         
     # measuredelay = pulsewidth -((1/localnode.linefreq)*smu.measure.nplc + 450e-6)
     # if measuredelay < 50e-6:
@@ -351,8 +447,7 @@ def pulse_train(device,biaslevel=0,pulselevel=0.5,biaswidth=0.5,pulsewidth=0.5,p
         # Calculate block numbers for the current iteration
         delay_block = current_block 
         measure_block = current_block + 1
-        print('delay block, in 1st measurement')
-        print(delay_block)
+
 
         # Set up the trigger model blocks for the current iteration
 
@@ -370,9 +465,6 @@ def pulse_train(device,biaslevel=0,pulselevel=0.5,biaswidth=0.5,pulsewidth=0.5,p
         # Calculate block numbers for the current iteration
         delay_block = current_block 
         measure_block = current_block + 1
-        print('delay block, in 2nd measurement')
-
-        print(delay_block)
 
         # Set up the trigger model blocks for the current iteration
 
@@ -396,22 +488,22 @@ def pulse_train(device,biaslevel=0,pulselevel=0.5,biaswidth=0.5,pulsewidth=0.5,p
     device.write("trigger.timer[1].enable = trigger.ON")
     device.write("waitcomplete()")
     time.sleep(1)
+    
+    # check device status and keep inquiring until measurement is done
     device.write("*OPC?")
     try:
-        print('try')
         status = float(device.read())
         print(status)
     except:
-        print('except')
         status=0
     while status != 1:
-        time.sleep(1)
+        # time.sleep(1)
         device.write("*OPC?")
         status = float(device.read())
         print('Measurement ongoing, please wait...')
     Vs, Is, times = [], [],[]
 
-    
+    # read the data in the buffer
     for i in np.arange(float(device.query("print(defbuffer1.n)"))):
         Vs.append(float(device.query("print(defbuffer1.sourcevalues["+str(i+1)+"])")))
         times.append(float(device.query("print(defbuffer1.relativetimestamps["+str(i+1)+"])")))
@@ -419,7 +511,7 @@ def pulse_train(device,biaslevel=0,pulselevel=0.5,biaswidth=0.5,pulsewidth=0.5,p
         
     
     
-
+    # plot data
     plt.figure()
     plt.xlabel('Time (s)')
     plt.plot(times,Vs,'o-')
@@ -433,12 +525,16 @@ def pulse_train(device,biaslevel=0,pulselevel=0.5,biaswidth=0.5,pulsewidth=0.5,p
     plt.ylabel('Current (A)')
     plt.xlabel('Voltage (V)')
     
+    # turn data into pandas DataFrame
     df = pd.DataFrame({'Time(s)': times, 'Voltage (V)': Vs, 'Current (A)': Is}) # turn data into a pandas dataframe with voltage and current columns
-    save = save_var.get()
-
+    save = save_var.get() # save_var is the one set in GUI
+    
+    #
     if save:
         # print('in the save')
         save_data(df,comments='pulse_train')
+        
+    return df
          
 def clear_measurement_widgets(measurement_frame):
     # Destroy existing widgets to clear the layout
@@ -516,12 +612,7 @@ def show_iv_widgets(measurement_frame,device):
 
 def show_it_widgets(measurement_frame,device):
     # Create and display labels and entry widgets for I-t measurement
-    # label = ttk.Label(measurement_frame, text="Time Duration:")
-    # label.grid(column=0, row=0)
-    # entry = ttk.Entry(measurement_frame)
-    # entry.grid(column=1, row=0)
-    # it_frame = ttk.Frame(frm)
-    # it_frame.grid(column=3, row=5, columnspan=4, pady=10)
+
     # Duration
     duration_label = ttk.Label(measurement_frame, text="Duration (s):")
     duration_label.grid(column=4, row=0)
@@ -620,7 +711,8 @@ def on_measurement_option_change(measurement_option,measurement_frame,device):
         show_pulse_train_widgets(measurement_frame,device)        
 def on_initialise(resource_name):
     device, device_name = initialise_SMU(resource_name)
-    display_device_name(frm, device_name)
+    label = ttk.Label(frm, text=f"Device Name: {device_name}")
+    label.grid(column=0, row=1)
     # vs_frame = ttk.Frame(frm)
     # vs_frame.grid(column=0, row=5, columnspan=4, pady=10)
     
@@ -701,7 +793,7 @@ def toggle_save():
 if __name__ == "__main__":
     
     rname = "USB0::0x05E6::0x2470::04473418::INSTR"
-    # sys.exit()
+
     print('Welcome to the Keithley 2470 control software')
     
     root = Tk()
@@ -752,72 +844,7 @@ if __name__ == "__main__":
     
     root.mainloop()
     '''
-    device,device_name= initialise_SMU(rname)        
-    device.timeout = 100000
-    # IV_loop(Vs,device,1,file_name='IV_JD_ICL10b',plot=True,save=False)
-    # IT_loop(device, 1,20,nplc=1)
-    source_values_1 = np.arange(0,0.002,0.0001)
-    source_values_2 = np.arange(0.002,0,-0.0001)
-    source_values = np.append(source_values_1,source_values_2)
-    # source_values = np.arange(0,6,0.1)
-    IV_measure(source_values,device,file_name='IV_curve',comments='',save=False,plot=True,ax=None,fig=None,gui=False,fourwire=False,sourcevolt=True)
-    
-    
-    pulse_train(device,biaslevel=0,pulselevel=3,biaswidth=0.1,pulsewidth=0.1,points=50,limit=2.1)
-    
-    time.sleep(1)
-    device.write("*OPC?")
-    try:
-        print('try')
-        status = float(device.read())
-    except:
-        print('except')
-        status=0
-    while status != 1:
-        time.sleep(1)
-        device.write("*OPC?")
-        status = float(device.read())
-        print('Measurement ongoing, please wait...')
-    Vs, Is, times = [], [],[]
 
-    
-    for i in np.arange(float(device.query("print(defbuffer1.n)"))):
-        Vs.append(float(device.query("print(defbuffer1.sourcevalues["+str(i+1)+"])")))
-        times.append(float(device.query("print(defbuffer1.relativetimestamps["+str(i+1)+"])")))
-        Is.append(float(device.query("print(defbuffer1.readings["+str(i+1)+"])")))
-        
-    
-    
-
-    plt.figure()
-    plt.xlabel('Time (s)')
-    plt.plot(times,Vs,'o-')
-    plt.ylabel('Voltage (V)')
-    plt.figure()
-    plt.xlabel('Time (s)')
-    plt.plot(times, Is,'o-')
-    plt.ylabel('Current (A)')
-    plt.figure()
-    plt.plot(Vs,Is,'o-')
-    plt.ylabel('Current (A)')
-    plt.xlabel('Voltage (V)')
-    
-    df = pd.DataFrame({'Time(s)': times, 'Voltage (V)': Vs, 'Current (A)': Is}) # turn data into a pandas dataframe with voltage and current columns
-    # print('df')
-    # print(df)
-    
-
-    # file_name = 'IV_curve' #set filename as desired              
-    save_datetime = datetime.datetime.now().strftime('_%Y-%m-%d %H-%M-%S') #get current date and time
-    file_name = 'Test_pulse'    
-    folder  = 'C:/Users/z5239428/OneDrive - UNSW/Data/I-V/HC_photodetection_IV/'
-    folder = 'C:/Data/'
-    comments=None
-    total_filename = folder+file_name+'_'+str(comments)+save_datetime+'.csv'
-    df.to_csv(total_filename)
-''' 
-    
-    
     
     
 
