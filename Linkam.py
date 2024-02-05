@@ -18,6 +18,8 @@ import datetime
 import threading 
 from queue import Queue, Empty
 from matplotlib.animation import FuncAnimation
+import matplotlib as mat
+# mat.use("TkAgg")
 
 def initialise_SMU(resource_name):
     rm=visa.ResourceManager()
@@ -26,15 +28,7 @@ def initialise_SMU(resource_name):
     print(device.query("*IDN?"))
     return device 
 
-#pick one of the ways of setting voltage points below
 
-Vs = np.arange(-0.5,0.5,0.01) # (start, end, step)
-Vs = np.linspace(-0.6,0.6,10) # (start, end, number_of_points)
-
-#pick one of the ways of setting temperature points below
-
-temp_range = np.arange(25,30,1)
-temp_range = np.linspace(30,32,2)
 
 def update_IV_plot(frame, ax, Vs,Is,comments):
     ax.clear()
@@ -43,61 +37,74 @@ def update_IV_plot(frame, ax, Vs,Is,comments):
     plt.pause(0.05)
         
 
-def IV_measure(Vs,device,file_name='IV_curve',comments='',save=False,plot=True,ax=None):
+def IV_measure(source_values,device,folder='C:/Data/',file_name='IV_curve',comments='',
+               save=False,plot=True,ax=None,fig=None,gui=False,fourwire=False,sourcevolt=True,
+               ilimit=0.1):
         
-    Is = [None for volt in Vs]
+    measure_values = [None for value in source_values]
     device.write("reset()")
-    device.write("smu.source.func = smu.FUNC_DC_VOLTAGE") # set source to voltage
-    device.write("smu.source.ilimit.level = 0.1") # set current limit (in Amps)
-    device.write("smu.source.autorange = smu.ON") # set voltage range to auto
-    device.write("smu.source.autodelay = smu.ON") # set delay                                                                                                                                                                                                                to auto
-    device.write("smu.measure.func = smu.FUNC_DC_CURRENT") # set measurement to current
-    device.write("smu.measure.autorange = smu.ON") # set current range to auto
-    device.write("smu.measure.nplc = 1") 
-    device.write("smu.measure.sense=smu.SENSE_2WIRE") # set to 2WIRE or 4WIRE
-    if plot:
-        if not ax:
-            fig, ax = plt.subplots()
-            # print('newax')
-            
-    for i, volt in enumerate(Vs):
-        device.write("smu.source.level = "+str(volt)) # Set voltage 
+    print('setting according to voltage or current source')
+    if sourcevolt:
+        print('voltage source!')
+        # Configuration for measuring current
+        source_func = "smu.FUNC_DC_VOLTAGE"
+        measure_func = "smu.FUNC_DC_CURRENT"
+        measure_label = 'Current (A)'
+        source_label = 'Voltage (V)'
+        device.write(f"smu.source.ilimit.level = {ilimit}")  # set current limit (in Amps)
+        # device.write("smu.source.ilimit.level = 0.1")  # set current limit (in Amps)
+        
+    else:
+        print('current source!')
+        # Configuration for measuring voltage
+        source_func = "smu.FUNC_DC_CURRENT"
+        measure_func = "smu.FUNC_DC_VOLTAGE"
+        measure_label = 'Voltage (V)'
+        source_label = 'Current (A)'
+        device.write("smu.source.vlimit.level = 1")  # set current limit (in Amps)
+        device.write(f"smu.source.ilimit.level = {ilimit}")  # set current limit (in Amps)
+    print('rest of the commands')
+    device.write(f"smu.source.func = {source_func}")  # set source function
+    
+    device.write("smu.source.autorange = smu.ON")  # set voltage/current range to auto
+    device.write("smu.source.autodelay = smu.ON")  # set delay to auto
+    device.write(f"smu.measure.func = {measure_func}")  # set measurement function
+    device.write("smu.measure.autorange = smu.ON")  # set current/voltage range to auto
+    device.write("smu.measure.nplc = 0.01")   
+    if fourwire: # set to 2WIRE or 4WIRE
+        device.write("smu.measure.sense=smu.SENSE_4WIRE") 
+    else:
+        
+        device.write("smu.measure.sense=smu.SENSE_2WIRE") 
+    print('moving to plot')
+    if not ax:
+        fig, ax = plt.subplots()
+    ax.set_xlabel(source_label)
+    ax.set_ylabel(measure_label)
+    for i, source_value in enumerate(source_values):
+        device.write("smu.source.level = "+str(source_value)) # Set voltage 
         device.write("smu.source.output = smu.ON") # SMU output on
         device.write("smu.measure.read()") # measure current
-        device.write("smu.source.output = smu.OFF") # SMU output off
-        Is[i] = device.query("print(defbuffer1.readings[defbuffer1.endindex])") # store current reading
+        # device.write("smu.source.output = smu.OFF") # SMU output off
+        measure_values[i] = device.query("print(defbuffer1.readings[defbuffer1.endindex])") # store current reading
     
-        Is[i] = float(Is[i]) # .query returns a string, so it must be casted to float number
-        # ax.clear()
-        # ax.plot(Vs,Is,label=comments)
-        # plt.legend()
-        # plt.pause(0.05)
+        measure_values[i] = float(measure_values[i]) # .query returns a string, so it must be casted to float number
+        ax.clear()
+        ax.plot(source_values,measure_values,label=comments)
+        plt.legend()
+        plt.pause(0.01)
         
-        aniV = FuncAnimation(fig, update_IV_plot, fargs=(ax, Vs,Is,comments), interval=1000)
         
-    
-    df = pd.DataFrame({'Voltage (V)':Vs, 'Current (A)': Is}) # turn data into a pandas dataframe with voltage and current columns
-    
-    
+        # aniV = FuncAnimation(fig, update_IV_plot, fargs=(ax, Vs,Is,comments), interval=1000)
+        
+    df = pd.DataFrame({source_label: source_values, measure_label: measure_values})
     if save:
         # file_name = 'IV_curve' #set filename as desired              
         save_datetime = datetime.datetime.now().strftime('_%Y-%m-%d %H-%M-%S') #get current date and time
         
-        folder  = 'C:/Users/z5239428/OneDrive - UNSW/Data/I-V/HC_photodetection_IV/'
+        # folder  = 'C:/Users/z5239428/OneDrive - UNSW/Data/I-V/HC_photodetection_IV/'
         total_filename = folder+file_name+'_'+str(comments)+save_datetime+'.csv'
         df.to_csv(total_filename)
-    
-    # if plot:
-    #     fig, ax = plt.subplots()
-    #     ax.plot(Vs,Is)
-    #     ax.set_ylabel('Current (A)')
-    #     ax.set_xlabel('Voltage (V)')
-    #     # plt.draw()
-    #     plt.show()
-    
-    
-        
-        
 
     return df
 
@@ -133,13 +140,15 @@ def IV_loop(Vs,device, runs, depvars=None,file_name='IV_curve',save=False,plot=F
         
 def temperature_monitor(connection, stop_event, data_queue):
     while not stop_event.is_set():
+        # print('monitoring temp function activATED!')
         dt_now = (datetime.datetime.now() - start).total_seconds()
         temp = connection.get_value(interface.StageValueType.HEATER1_TEMP)
         data_queue.put((dt_now, temp))
-
+        # plt.pause(0.01)
         time.sleep(1)
 def update_plot(frame, data_queue, ax):
     try:
+        # print('UPDATEING PLOT!')
         timestamp, temperature = data_queue.get_nowait()
         times.append(timestamp)
         temps.append(temperature)
@@ -152,6 +161,7 @@ def update_plot(frame, data_queue, ax):
         # plt.draw()
         # plt.pause(0.001)
     except Empty:
+        # print('THE EMPYTINES OF LIFE')
         pass
 
 def wait_for_temperature_stabilization(connection, target_temperature, tolerance=0.1, stabilization_duration=60):
@@ -208,280 +218,124 @@ temps = []
 fig, ax = plt.subplots()
 times = []
 temps = []
-
-with sdk.SDKWrapper() as handle:
-    with handle.connect() as connection:
-        print(f"Name: {connection.get_controller_name()}")
-        print(f"Heater measurement: {connection.get_value(interface.StageValueType.HEATER1_TEMP)}")
-        print(f"Heater set-point before: {connection.get_value(interface.StageValueType.HEATER_SETPOINT)}")
-
-        start = datetime.datetime.now()
-        for i, set_temp in enumerate(temp_range):
-            
-            # main_loop(Vs, temp_range, device, connection)
-            
-            if not connection.set_value(interface.StageValueType.HEATER_SETPOINT, set_temp):
-                raise Exception('Something broke')
-            connection.enable_heater(True)
-
-            
-
-            
-            
-            temperature_thread = threading.Thread(target=temperature_monitor, args=(connection, stop_event, data_queue))
-            temperature_thread.start()
-
-            # Create a thread for plotting temperature
-            # plot_thread = threading.Thread(target=plot_temperature, args=(data_queue, stop_event))
-            # plot_thread.start()
-            
-            
-
-            ani = FuncAnimation(fig, update_plot, fargs=(data_queue, ax), interval=1000)
-            
-            print(f"Heater set-point after: {connection.get_value(interface.StageValueType.HEATER_SETPOINT)}")
+ani = FuncAnimation(fig, update_plot, fargs=(data_queue, ax), interval=10)
+if __name__ == "__main__":
+    #pick one of the ways of setting voltage points below
+# FOR Voltage controlled use the following
+    # Vs = np.arange(-0.5,0.5,0.01) # (start, end, step)
+    # Vs = np.linspace(-0.6,0.6,10) # (start, end, number_of_points)
+    # source_values = np.arange(-0.5,0.5,0.01) # (start, end, step)
+    # source_values_1 = np.arange(0,3.2,0.05) # (start, end, number_of_points)
+    # source_values_2 = np.arange(3.2,0,-0.05)
+    # source_values = np.append(source_values_1,source_values_2)
     
-            # for _ in range(10):
-            #     print(f"Heater measurement: {connection.get_value(interface.StageValueType.HEATER1_TEMP)}")
-            #     time.sleep(1)
-            
-            # while np.abs(set_temp-connection.get_value(interface.StageValueType.HEATER1_TEMP))>0.1:
-            #     time.sleep(1)
-            wait_for_temperature_stabilization(connection, set_temp)
+# FOR Current controlled use the following
+    source_values_1 = np.arange(0,0.005,0.0001)
+    source_values_2 = np.arange(0.005,0,-0.0001)
+    source_values = np.append(source_values_1,source_values_2)
+    # Vs=source_values
+    #pick one of the ways of setting temperature points below
 
-                # print(f"Heater measurement: {connection.get_value(interface.StageValueType.HEATER1_TEMP)}")
+    temp_range = np.arange(25,27,1)
+    # temp_range = np.linspace(30,45,5)
+    folder='C:/Data/NbOx/Nb 20 nm/' 
+    file_name='20nm Nb_20um_d9_2_test_50 Ohm' 
+    save=True
+    
+    ilimit=0.005 
+    sourcevolt=False
+    fourwire=False
+    stabilization_duration = 120
+    tolerance=0.05
+    with sdk.SDKWrapper() as handle:
+        with handle.connect() as connection:
+            print(f"Name: {connection.get_controller_name()}") # get and print name of temperature controller
+            print(f"Heater measurement: {connection.get_value(interface.StageValueType.HEATER1_TEMP)}") # get heater measurement
+            print(f"Heater set-point before: {connection.get_value(interface.StageValueType.HEATER_SETPOINT)}") # get temperature set point
+    
+            start = datetime.datetime.now() # get starting time
+            for i, set_temp in enumerate(temp_range):
                 
-            
-            IV_measure(Vs,device,comments = set_temp,plot=True)
-            
-            
-    stop_event.set()
-    temperature_thread.join()
-    connection.enable_heater(False)
+                # main_loop(Vs, temp_range, device, connection)
+                
+                if not connection.set_value(interface.StageValueType.HEATER_SETPOINT, set_temp): # try setting temperature
+                    raise Exception('Something broke') # raise error if setting temperature doesn't work
+                connection.enable_heater(True) # enable heater
     
-
-plt.show()
-
-'''
-"""
-# Created on Thu Nov  2 12:42:37 2023
-
-# @author: z5239428
-"""
-
-import numpy as np
-import matplotlib
-matplotlib.use('TkAgg') 
-
-import matplotlib.pyplot as plt
-import pandas as pd
-import pyvisa as visa
+                
     
-import logging
-import time
-
-from pylinkam import interface, sdk
-import datetime
-import threading 
-from queue import Queue, Empty
-from matplotlib.animation import FuncAnimation
-
-def initialise_SMU(resource_name):
-    rm=visa.ResourceManager()
-    device=rm.open_resource(resource_name)
-    # device.write("*RST")
-    print(device.query("*IDN?"))
-    return device 
-
-#pick one of the ways of setting voltage points below
-
-Vs = np.arange(-0.5, 0.5, 0.01)  # (start, end, step)
-Vs = np.linspace(-0.6, 0.6, 10)  # (start, end, number_of_points)
-temp_range = np.arange(25, 30, 1)
-temp_range = np.linspace(30, 32, 1)
-
-#pick one of the ways of setting voltage points above
-
-def IV_measure(vs, device, file_name='IV_curve', comments='', save=False, plot=True, ax=None):
-    is_values = [None for volt in vs]
-    device.write("reset()")
-    device.write("smu.source.func = smu.FUNC_DC_VOLTAGE")  # set source to voltage
-    device.write("smu.source.ilimit.level = 0.1")  # set current limit (in Amps)
-    device.write("smu.source.autorange = smu.ON")  # set voltage range to auto
-    device.write("smu.source.autodelay = smu.ON")  # set delay to auto
-    device.write("smu.measure.func = smu.FUNC_DC_CURRENT")  # set measurement to current
-    device.write("smu.measure.autorange = smu.ON")  # set current range to auto
-    device.write("smu.measure.nplc = 1") 
-    device.write("smu.measure.sense=smu.SENSE_2WIRE")  # set to 2WIRE or 4WIRE
-    if plot:
-        if not ax:
-            fig, ax = plt.subplots()
-            
-    for i, volt in enumerate(vs):
-        device.write(f"smu.source.level = {volt}")  # Set voltage 
-        device.write("smu.source.output = smu.ON")  # SMU output on
-        device.write("smu.measure.read()")  # measure current
-        device.write("smu.source.output = smu.OFF")  # SMU output off
-        is_values[i] = device.query("print(defbuffer1.readings[defbuffer1.endindex])")  # store current reading
-        is_values[i] = float(is_values[i])  # .query returns a string, so it must be casted to float number
-        if plot:
-            ax.clear()
-            ax.plot(vs, is_values, label=comments)
-            plt.legend()
-            plt.pause(0.05)
+                
+                # start a thread of contrinuous temperature monitoring
+                temperature_thread = threading.Thread(target=temperature_monitor, args=(connection, stop_event, data_queue))
+                temperature_thread.start()
     
-    df = pd.DataFrame({'Voltage (V)': vs, 'Current (A)': is_values})
-    
-    if save:
-        save_datetime = datetime.datetime.now().strftime('_%Y-%m-%d %H-%M-%S')
-        folder = 'C:/Users/z5239428/OneDrive - UNSW/Data/I-V/HC_photodetection_IV/'
-        total_filename = folder + file_name + '_' + str(comments) + save_datetime + '.csv'
-        df.to_csv(total_filename)
+                # Create a thread for plotting temperature
+                # plot_thread = threading.Thread(target=plot_temperature, args=(data_queue, stop_event))
+                # plot_thread.start()
+                
+                
 
-    return df
-
-def IV_loop(vs, device, runs, depvars=None, file_name='IV_curve', save=False, plot=False):
-    if plot:
-        fig, ax = plt.subplots()
-    else:
-        fig, ax = None, None
-    for run in np.arange(runs):
-        if not depvars:
-            comments = run + 1
-        if run == 0:
-            input("Press Enter to start first measurement")
-        else:
-            input("Press Enter to start next measurement")
+                
+                plt.pause(0.01)
+                # print heater setpoint after having enabled heater
+                print(f"Heater set-point after: {connection.get_value(interface.StageValueType.HEATER_SETPOINT)}")
         
-        df = IV_measure(vs, device, comments=comments, save=False, plot=plot, ax=ax)
-        print(f'Measurement {run+1} complete')
-        if save:
-            comments2 = input('If required, enter additional comments to the filename\n')
-            save_datetime = datetime.datetime.now().strftime('_%Y-%m-%d %H-%M-%S')
-            folder = 'C:/Users/z5239428/OneDrive - UNSW/Data/I-V/HC_photodetection_IV/'
-            total_filename = folder + file_name + '_' + str(comments) + '_' + comments2 + save_datetime + '.csv'
-            df.to_csv(total_filename)
+                start_time = time.time()
+                stable_duration = 0 # initialise the variable 
 
-def temperature_monitor(connection, stop_event, data_queue):
-    while not stop_event.is_set():
-        dt_now = (datetime.datetime.now() - start).total_seconds()
-        temp = connection.get_value(interface.StageValueType.HEATER1_TEMP)
-        data_queue.put((dt_now, temp))
-        time.sleep(1)
+                # wait for temperature stabilisation
+                while stable_duration < stabilization_duration:
+                    plt.pause(0.01) # pause is important as it allows animations to update
 
-def update_plot(frame, data_queue, ax, ax2):
-    try:
-        timestamp, temperature, iv_data = data_queue.get_nowait()
-        times.append(timestamp)
-        temps.append(temperature)
-        ax.clear()
-        ax.plot(times, temps, 'o-', label='Temperature')
-        ax.set_xlabel('Time since start (s)')
-        ax.set_ylabel('Temperature (C)')
-        ax.legend()
+                    current_temperature = connection.get_value(interface.StageValueType.HEATER1_TEMP)
+                    
+                    # Check if the current temperature is within the tolerance range around the target temperature
+                    if abs(current_temperature - set_temp) <= tolerance:
+                        stable_duration += time.time() - start_time
+                    else:
+                        # Reset the start time if the temperature goes outside the tolerance range
+                        start_time = time.time()
+                        stable_duration = 0
+    
+                    # Adjust the sleep interval based on your system's characteristics
+                    time.sleep(1) # not sure this sleep time is needed. 
+    
+                    # print(f"Heater measurement: {connection.get_value(interface.StageValueType.HEATER1_TEMP)}")
+                    
+                plt.pause(0.01)
+                # temperature is stable, so trigger IV measurement
+                IV_measure(source_values,device,file_name=file_name,plot=True,save=save,
+                        folder=folder,ilimit=ilimit,sourcevolt=sourcevolt,
+                        fourwire=fourwire,comments=set_temp+'C')
+                time.sleep(1)
+                
+                # keep inquiring device status and wait until IV measurement is done
+                device.write("*OPC?")
+                try:
 
-        # Plot IV curve on a different axis
-        ax2.clear()
-        ax2.plot(iv_data['Voltage (V)'], iv_data['Current (A)'], label='IV Curve')
-        ax2.set_xlabel('Voltage (V)')
-        ax2.set_ylabel('Current (A)')
-        ax2.legend()
+                    status = float(device.read())
+
+                except:
+                    print('except')
+                    status=0
+                while status != 1:
+                    print('Still measuring IV - hold your horses!')
+                    time.sleep(1)
+                    device.write("*OPC?")
+                    status = float(device.read())
+                plt.pause(0.01)
+                
+                
+        # join threads and disable heater once measurements are done     
+        stop_event.set()
+        temperature_thread.join()
+        connection.enable_heater(False)
         
-        plt.pause(0.01)
-    except Empty:
-        pass
-
-def wait_for_temperature_stabilization(connection, target_temperature, tolerance=0.1, stabilization_duration=60):
-    start_time = time.time()
-    stable_duration = 0
-
-    while stable_duration < stabilization_duration:
-        current_temperature = connection.get_value(interface.StageValueType.HEATER1_TEMP)
-        if abs(current_temperature - target_temperature) <= tolerance:
-            stable_duration += time.time() - start_time
-        else:
-            start_time = time.time()
-            stable_duration = 0
-        time.sleep(1)
-
-def iv_measure_threaded(vs, device, temperature, data_queue):
-    is_values = []
-    iv_data = IV_measure(vs, device,plot=False)
-    data_queue.put((temperature, iv_data))
-    is_values.append(iv_data)
-    return is_values
-
-def main_loop(vs, set_temperatures, device, connection):
-    temperature_thread = None
-
-    try:
-        for temperature in set_temperatures:
-            if not connection.set_value(interface.StageValueType.HEATER_SETPOINT, temperature):
-                raise Exception('Something broke')
-            connection.enable_heater(True)
-            wait_for_temperature_stabilization(connection, temperature)
-
-            iv_data_queue = Queue()
-            iv_thread = threading.Thread(target=iv_measure_threaded, args=(vs, device, temperature, iv_data_queue))
-            iv_thread.start()
-
-            # Create a thread for continuous temperature monitoring
-            temperature_thread = threading.Thread(target=temperature_monitor, args=(connection, stop_event, data_queue))
-            temperature_thread.start()
-
-            # Create a FuncAnimation for updating the plot
-            ani = FuncAnimation(fig, update_plot, fargs=(data_queue, ax, ax2), interval=1000)
-            plt.show()
-
-            iv_thread.join()
-
-            iv_data = []
-            try:
-                while True:
-                    iv_data.append(iv_data_queue.get_nowait())
-            except Empty:
-                pass
-
-    finally:
-        if temperature_thread:
-            stop_event.set()
-            temperature_thread.join()
-            connection.enable_heater(False)
-
-logging.basicConfig(level=logging.DEBUG)
-stop_event = threading.Event()
-data_queue = Queue()
-
-rname = "USB0::0x05E6::0x2470::04473418::INSTR"
-device = initialise_SMU(rname)
-
-times = []
-temps = []
-
-fig, (ax, ax2) = plt.subplots(1, 2)
-
-with sdk.SDKWrapper() as handle:
-    with handle.connect() as connection:
-        print(f"Name: {connection.get_controller_name()}")
-        print(f"Heater measurement: {connection.get_value(interface.StageValueType.HEATER1_TEMP)}")
-        print(f"Heater set-point before: {connection.get_value(interface.StageValueType.HEATER_SETPOINT)}")
-
-        start = datetime.datetime.now()
-
-        main_loop(Vs, temp_range, device, connection)
-
-
-'''
-
-
-
-
-
-
-
-
-
-
+    
+    plt.show()
+    if ani is not None:
+        ani.event_source.stop()
+    #     plt.close()
 
 
 
