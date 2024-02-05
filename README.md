@@ -2,15 +2,17 @@
 
 Code associated with the Hot Carrier Photodetection (HCPD) project.
 
-Main purpose is to achive remote device control and measurement automation.
+The main purpose is to achive remote device control and measurement automation.
 
 The various pieces of code interface with
 
 a) A source measurement unit (Keithley 2470 model)
 
-b) A temperature controller (part of a Linkam cryostage kit)
+b) A temperature controller (T96, part of a Linkam cryostage kit)
 
 c) A laser diode controller (Thorlabs CLD1010)
+
+Additionally, Cr_TMM.py replicates some results from James Dimmock's thesis using the TMM features of solcore: https://www.solcore.solar/
 
 ## --- SMU control ---
 SMU control is achieved using pyvisa: https://pyvisa.readthedocs.io/en/latest/
