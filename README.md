@@ -35,6 +35,8 @@ This requires license and .dll files that come with the Linkam software developm
 
 Linkam.py is the most up-to-date commented file, and is designed to do temperature dependent IV measurements, interfacing both with the temperature controller and the SMU.
 
+NOTE! Any code using the Linkam SDK must be run using the command prompt! Running it via Spyder WILL result in an ERROR.
+
 ## --- Laser diode controller --- 
 
 Laser diode control is achieved using pyvisa: https://pyvisa.readthedocs.io/en/latest/
